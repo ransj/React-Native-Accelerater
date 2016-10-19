@@ -10,7 +10,7 @@ dependencies {
 sourceSets {
   main {
     java {
-      srcDirs = ['../ReactAndroid/src/main/java', 'src/compat/java']
+      srcDirs = ['../ReactAndroid/src/main/java', 'src/main/java']
       includes = [
         'com/facebook/react/processing/ReactNativeModuleProcessor.java',
         'com/facebook/react/processing/ReactPropertyProcessor.java',
