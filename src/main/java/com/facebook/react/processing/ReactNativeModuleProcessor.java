@@ -58,6 +58,7 @@ import static javax.lang.model.element.Modifier.PUBLIC;
  * @author ransj
  */
 public class ReactNativeModuleProcessor extends AbstractProcessor {
+  private static final int OFFSET = 1000;
   private static final ClassName METHOD_DESCRIPTION = ClassName.get("com.facebook.react.cxxbridge", "JavaModuleWrapper", "MethodDescriptor");
   private static final ClassName JAVA_MODULE_WRAPPER = ClassName.get("com.facebook.react.cxxbridge", "JavaModuleWrapper");
   private static final ClassName NATIVE_MODULE_HELPER = ClassName.get("com.facebook.react.cxxbridge", "JavaModuleWrapper", "AbstractModuleHelper");
@@ -116,7 +117,7 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
         clsInfo.addMethod(new MethodInfo((ExecutableElement) ele, isSyncHook, mTypes, mElements));
       }
     }
-    int count = 0;
+    int count = OFFSET;
     List<ClassInfo> classInfos = new ArrayList<>();
     for (ClassInfo info : mClasses.values()) {
       writeToFile(info, count++);
@@ -248,7 +249,7 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
       ClassInfo info = classInfos.get(i);
       builder.add("if ($L instanceof $T) {\n", "module", ClassName.get(info.mPkgName, info.mClsName));
       builder.indent().addStatement("return new $T(($T)$L)",
-        ClassName.get(JAVA_MODULE_WRAPPER.packageName(), JAVA_MODULE_WRAPPER.simpleName() + "$" + i),
+        ClassName.get(JAVA_MODULE_WRAPPER.packageName(), JAVA_MODULE_WRAPPER.simpleName() + "$" + (i + OFFSET)),
         ClassName.get(info.mPkgName, info.mClsName),
         "module");
       builder.unindent();
@@ -265,7 +266,7 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
       .returns(NATIVE_MODULE_HELPER)
       .addCode(builder.build())
       .build();
-    String clsName = JAVA_MODULE_WRAPPER.simpleName() + "$CoreModuleProvider";
+    String clsName = JAVA_MODULE_WRAPPER.simpleName() + "$CustomModuleProvider";
     TypeSpec holderClass = TypeSpec.classBuilder(clsName)
       .addSuperinterface(NATIVE_MODULE_PROVIDER)
       .addMethod(methodSpec)
