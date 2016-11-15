@@ -297,9 +297,9 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
   }
 
   private static class MethodInfo {
-    static final String TYPE_RESULT_ASYNC = "METHOD_TYPE_REMOTE";
-    static final String TYPE_RESULT_PROMISE = "METHOD_TYPE_REMOTE_ASYNC";
-    static final String TYPE_RESULT_SYNC = "METHOD_TYPE_SYNC_HOOK";
+    static final String TYPE_RESULT_ASYNC = "METHOD_TYPE_ASYNC";
+    static final String TYPE_RESULT_PROMISE = "METHOD_TYPE_PROMISE";
+    static final String TYPE_RESULT_SYNC = "METHOD_TYPE_SYNC";
     String mSignature;
     String mName;
     private List<? extends VariableElement> mParameters;
