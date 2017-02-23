@@ -298,9 +298,9 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
   }
 
   private static class MethodInfo {
-    static final String TYPE_RESULT_ASYNC = "METHOD_TYPE_REMOTE";
-    static final String TYPE_RESULT_PROMISE = "METHOD_TYPE_REMOTE_ASYNC";
-    static final String TYPE_RESULT_SYNC = "METHOD_TYPE_SYNC_HOOK";
+    static final String TYPE_RESULT_ASYNC = "METHOD_TYPE_ASYNC";
+    static final String TYPE_RESULT_PROMISE = "METHOD_TYPE_PROMISE";
+    static final String TYPE_RESULT_SYNC = "METHOD_TYPE_SYNC";
     String mSignature;
     String mName;
     private List<? extends VariableElement> mParameters;
@@ -399,11 +399,11 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
         } else if (indexType.equals(TypeName.get(boolean.class)) || indexType.equals(TypeName.get(Boolean.class))) {
           builder.add("$L.getBoolean($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(int.class)) || indexType.equals(TypeName.get(Integer.class))) {
-          builder.add("$L.getInt($L)", "parameters", offset);
+          builder.add("(int)$L.getDouble($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(double.class)) || indexType.equals(TypeName.get(Double.class))) {
           builder.add("$L.getDouble($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(float.class)) || indexType.equals(TypeName.get(Float.class))) {
-          builder.add("$L.getFloat($L)", "parameters", offset);
+          builder.add("(float)$L.getDouble($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(String.class))) {
           builder.add("$L.getString($L)", "parameters", offset);
         } else if (indexType.equals(ClassName.get(Callback.class))) {
