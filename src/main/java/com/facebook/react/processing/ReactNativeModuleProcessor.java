@@ -1,19 +1,15 @@
-/**
- * Copyright (c) 2015-present, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
- */
 package com.facebook.react.processing;
 
 import com.facebook.infer.annotation.Assertions;
 import com.facebook.infer.annotation.SuppressFieldNotInitialized;
 import com.facebook.react.bridge.Callback;
+import com.facebook.react.bridge.Dynamic;
 import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableArray;
+import com.facebook.react.bridge.WritableMap;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.CodeBlock;
 import com.squareup.javapoet.JavaFile;
@@ -35,6 +31,8 @@ import javax.annotation.processing.Filer;
 import javax.annotation.processing.Messager;
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.annotation.processing.RoundEnvironment;
+import javax.annotation.processing.SupportedAnnotationTypes;
+import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
@@ -44,37 +42,40 @@ import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
+import javax.tools.Diagnostic;
 
-import static javax.lang.model.element.Modifier.PRIVATE;
-import static javax.lang.model.element.Modifier.PROTECTED;
 import static javax.lang.model.element.Modifier.PUBLIC;
 
 /**
- *
  * This annotation processor crawls subclasses of BaseJavaModule and finds their
- * exported methods with the @ReactMethod or @ReactSyncHook annotation. It generates a class
- * per native module. This class contains methods to retrieve description of all
+ * exported methods with the @ReactMethod or @ReactSyncHook annotation. It generates a class implements @ModuleHelper
+ * per native module and CoreModuleProvider class to provide module helper for native modules. This class contains methods to retrieve description of all
  * methods and a way to invoke methods without reflection.
+ *
  * @author ransj
  */
+@SupportedAnnotationTypes("com.facebook.react.bridge.ReactMethod")
+@SupportedSourceVersion(SourceVersion.RELEASE_7)
 public class ReactNativeModuleProcessor extends AbstractProcessor {
   private static final int OFFSET = 1000;
-  private static final ClassName METHOD_DESCRIPTION = ClassName.get("com.facebook.react.cxxbridge", "JavaModuleWrapper", "MethodDescriptor");
-  private static final ClassName JAVA_MODULE_WRAPPER = ClassName.get("com.facebook.react.cxxbridge", "JavaModuleWrapper");
-  private static final ClassName NATIVE_MODULE_HELPER = ClassName.get("com.facebook.react.cxxbridge", "JavaModuleWrapper", "AbstractModuleHelper");
-  private static final ClassName NATIVE_MODULE_PROVIDER = ClassName.get("com.facebook.react.cxxbridge", "JavaModuleWrapper", "ModuleProvider");
-  private static final ClassName CATALYSTINSTANCE = ClassName.get("com.facebook.react.bridge", "CatalystInstance");
-  private static final ClassName EXECUTORTOKEN = ClassName.get("com.facebook.react.bridge", "ExecutorToken");
+  private static final ClassName JAVA_MODULE_WRAPPER = ClassName.get("com.facebook.react.bridge", "JavaModuleWrapper");
+  private static final ClassName METHOD_DESCRIPTION = ClassName.get("com.facebook.react.bridge", "MethodDescriptor");
+  private static final ClassName NATIVE_MODULE_HELPER = ClassName.get("com.facebook.react.bridge", "AcJavaModuleWrapper", "ModuleHelper");
+  private static final ClassName NATIVE_MODULE_PROVIDER = ClassName.get("com.facebook.react.bridge", "AcJavaModuleWrapper", "ModuleProvider");
+  private static final ClassName JSINSTANCE = ClassName.get("com.facebook.react.bridge", "JSInstance");
   private static final ClassName READABLENATIVEARRAY = ClassName.get("com.facebook.react.bridge", "ReadableNativeArray");
   private static final ClassName BASE_JAVA_MODULE = ClassName.get("com.facebook.react.bridge", "BaseJavaModule");
   private static final ClassName NATIVE_ARGUMENTS_PARSE_EXCEPTION = ClassName.get("com.facebook.react.bridge", "NativeArgumentsParseException");
+  private static final ClassName DYNAMICFROMARRAY = ClassName.get("com.facebook.react.bridge", "DynamicFromArray");
   private static final ClassName CALLBACKIMP = ClassName.get("com.facebook.react.bridge", "CallbackImpl");
   private static final ClassName PROMISEIMP = ClassName.get("com.facebook.react.bridge", "PromiseImpl");
   private static final TypeName GET_METHOD_DESCRIPTIONS_LIST_TYPE =
     ParameterizedTypeName.get(ClassName.get(List.class), METHOD_DESCRIPTION);
+
   private final Map<String, ClassInfo> mClasses;
 
   private static final String FIELD_NAME_BASE_JAVA_MODULE = "mNativeModule";
+  private static final String FIELD_NAME_METHODS_DESC = "mMethodsDesc";
 
   @SuppressFieldNotInitialized
   private Filer mFiler;
@@ -102,19 +103,19 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
   public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
     mClasses.clear();
     for (TypeElement te : annotations) {
-      ClassName annotationName = ClassName.get(te);
-      boolean isSyncHook = "ReactMethod".equals(annotationName.simpleName()) ? false : true;
-      for (Element ele : roundEnv.getElementsAnnotatedWith(te)) {
-        ClassName clsName = ClassName.get((TypeElement) ele.getEnclosingElement());
-        String pkgName = clsName.packageName();
-        String simpleName = clsName.simpleName();
-        String key = pkgName + simpleName;
+      for (Element mele : roundEnv.getElementsAnnotatedWith(te)) {
+        ClassName clsName = ClassName.get((TypeElement) mele.getEnclosingElement());
+        String key = clsName.reflectionName();
+        ReactMethod method = mele.getAnnotation(ReactMethod.class);
+        boolean isSyncHook = method.isBlockingSynchronousMethod();
+        mMessager.printMessage(Diagnostic.Kind.NOTE, "process " + key + " , " + mele);
+        mMessager.printMessage(Diagnostic.Kind.NOTE, method + " , " + isSyncHook);
         ClassInfo clsInfo = mClasses.get(key);
         if (clsInfo == null) {
-          clsInfo = new ClassInfo(pkgName, simpleName);
+          clsInfo = new ClassInfo(clsName);
           mClasses.put(key, clsInfo);
         }
-        clsInfo.addMethod(new MethodInfo((ExecutableElement) ele, isSyncHook, mTypes, mElements));
+        clsInfo.addMethod(new MethodInfo((ExecutableElement) mele, isSyncHook, mTypes, mElements));
       }
     }
     int count = OFFSET;
@@ -133,7 +134,6 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
   public Set<String> getSupportedAnnotationTypes() {
     Set<String> set = new HashSet<>();
     set.add("com.facebook.react.bridge.ReactMethod");
-    set.add("com.facebook.react.bridge.ReactSyncHook");
     return set;
   }
 
@@ -143,15 +143,15 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
   }
 
   private void writeToFile(ClassInfo classInfo, int index) {
-    String clsName = JAVA_MODULE_WRAPPER.simpleName() + "$"+index;
-    ClassName className = ClassName.get(classInfo.mPkgName, classInfo.mClsName);
-    TypeSpec holderClass = TypeSpec.classBuilder(clsName)
-      .superclass(NATIVE_MODULE_HELPER)
+    String targetCls = JAVA_MODULE_WRAPPER.simpleName()+"$"+index;
+    ClassName className = classInfo.mClsName;
+    TypeSpec holderClass = TypeSpec.classBuilder(targetCls)
+      .addSuperinterface(NATIVE_MODULE_HELPER)
       .addModifiers(PUBLIC)
       .addField(className, FIELD_NAME_BASE_JAVA_MODULE, Modifier.PRIVATE)
+      .addField(GET_METHOD_DESCRIPTIONS_LIST_TYPE, FIELD_NAME_METHODS_DESC, Modifier.PRIVATE)
       .addMethod(generateHelperConstructor(className))
       .addMethod(generateMethodGetMethodDescriptors(classInfo.mMethods))
-      .addMethod(generateMethodNewGetMethodDescriptors(classInfo.mMethods))
       .addMethod(generateMethodInvoke(classInfo.mMethods))
       .build();
     JavaFile javaFile = JavaFile.builder(JAVA_MODULE_WRAPPER.packageName(), holderClass)
@@ -167,7 +167,7 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
 
   private MethodSpec generateHelperConstructor(ClassName className) {
     MethodSpec method = MethodSpec.constructorBuilder()
-      .addModifiers(Modifier.PUBLIC)
+      .addModifiers(PUBLIC)
       .addParameter(className, "module")
       .addStatement("mNativeModule = $L", "module")
       .build();
@@ -176,44 +176,25 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
 
   private MethodSpec generateMethodGetMethodDescriptors(List<MethodInfo> methodInfos) {
     CodeBlock.Builder builder = CodeBlock.builder();
-    builder.addStatement("$T $L = new $T<>()", GET_METHOD_DESCRIPTIONS_LIST_TYPE, "list", ArrayList.class);
+    builder.beginControlFlow("if ($L == null)", FIELD_NAME_METHODS_DESC);
+    builder.addStatement("$L = new $T<>()", FIELD_NAME_METHODS_DESC, ArrayList.class);
     for (int i = 0, len = methodInfos.size(); i < len; i++) {
       MethodInfo methodInfo = methodInfos.get(i);
+      builder.add("\n");
       builder.add("// method $L \n", methodInfo.mName);
       builder.addStatement("$T $L = new $T()", METHOD_DESCRIPTION, methodInfo.mName, METHOD_DESCRIPTION);
       builder.addStatement("$L.name = $S", methodInfo.mName, methodInfo.mName);
       builder.addStatement("$L.type = $T.$L", methodInfo.mName, BASE_JAVA_MODULE, methodInfo.mMethodType);
-//      builder.addStatement("$L.signature = $S", methodInfo.mName, methodInfo.mSignature);
-//      builder.addStatement("checkMethodSignature($L, $L)", FIELD_NAME_BASE_JAVA_MODULE, methodInfo.mName);
-      builder.addStatement("$L.add($L)", "list", methodInfo.mName);
+      if (methodInfo.isSyncMethod()) {
+        builder.addStatement("$L.signature = $S", methodInfo.mName, methodInfo.mSignature);
+      }
+      builder.addStatement("$L.add($L)", FIELD_NAME_METHODS_DESC, methodInfo.mName);
     }
-    builder.addStatement("return $L", "list");
+    builder.endControlFlow();
+    builder.addStatement("return $L", FIELD_NAME_METHODS_DESC);
     MethodSpec method = MethodSpec.methodBuilder("getMethodDescriptors")
       .addAnnotation(Override.class)
-      .addModifiers(Modifier.PUBLIC)
-      .returns(GET_METHOD_DESCRIPTIONS_LIST_TYPE)
-      .addCode(builder.build())
-      .build();
-    return method;
-  }
-
-  private MethodSpec generateMethodNewGetMethodDescriptors(List<MethodInfo> methodInfos) {
-    CodeBlock.Builder builder = CodeBlock.builder();
-    builder.addStatement("$T $L = new $T<>()", GET_METHOD_DESCRIPTIONS_LIST_TYPE, "list", ArrayList.class);
-    for (int i = 0, len = methodInfos.size(); i < len; i++) {
-      MethodInfo methodInfo = methodInfos.get(i);
-      builder.add("// method $L \n", methodInfo.mName);
-      builder.addStatement("$T $L = new $T()", METHOD_DESCRIPTION, methodInfo.mName, METHOD_DESCRIPTION);
-      builder.addStatement("$L.name = $S", methodInfo.mName, methodInfo.mName);
-      builder.addStatement("$L.type = $T.$L", methodInfo.mName, BASE_JAVA_MODULE, methodInfo.getMethodType());
-      builder.addStatement("$L.signature = $S", methodInfo.mName, methodInfo.mSignature);
-      builder.addStatement("checkMethodSignature($L, $L)", FIELD_NAME_BASE_JAVA_MODULE, methodInfo.mName);
-      builder.addStatement("$L.add($L)", "list", methodInfo.mName);
-    }
-    builder.addStatement("return $L", "list");
-    MethodSpec method = MethodSpec.methodBuilder("newGetMethodDescriptors")
-      .addAnnotation(Override.class)
-      .addModifiers(Modifier.PUBLIC)
+      .addModifiers(PUBLIC)
       .returns(GET_METHOD_DESCRIPTIONS_LIST_TYPE)
       .addCode(builder.build())
       .build();
@@ -233,9 +214,8 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
     builder.add("}\n");
     MethodSpec method = MethodSpec.methodBuilder("invoke")
       .addAnnotation(Override.class)
-      .addModifiers(Modifier.PUBLIC)
-      .addParameter(CATALYSTINSTANCE, "catalystInstance")
-      .addParameter(EXECUTORTOKEN, "executorToken")
+      .addModifiers(PUBLIC)
+      .addParameter(JSINSTANCE, "jsInstance")
       .addParameter(int.class, "methodId")
       .addParameter(READABLENATIVEARRAY, "parameters")
       .addCode(builder.build())
@@ -247,13 +227,13 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
     CodeBlock.Builder builder = CodeBlock.builder();
     for (int i = 0, len = classInfos.size(); i < len; i++) {
       ClassInfo info = classInfos.get(i);
-      builder.add("if ($L instanceof $T) {\n", "module", ClassName.get(info.mPkgName, info.mClsName));
+      builder.add("if ($L instanceof $T) {\n", "module", info.mClsName);
       builder.indent().addStatement("return new $T(($T)$L)",
-        ClassName.get(JAVA_MODULE_WRAPPER.packageName(), JAVA_MODULE_WRAPPER.simpleName() + "$" + (i + OFFSET)),
-        ClassName.get(info.mPkgName, info.mClsName),
+        ClassName.get(JAVA_MODULE_WRAPPER.packageName(), JAVA_MODULE_WRAPPER.simpleName() + "$" + (OFFSET + i)),
+        info.mClsName,
         "module");
       builder.unindent();
-      if(i < len -1){
+      if (i < len - 1) {
         builder.add("} else ");
       }
     }
@@ -283,16 +263,16 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
   }
 
   private class ClassInfo {
-    private String mPkgName;
-    private String mClsName;
     private List<MethodInfo> mMethods = new ArrayList<>();
+    private ClassName mClsName;
 
-    public ClassInfo(String pkgName, String className) {
-      mPkgName = pkgName;
+    public ClassInfo(ClassName className) {
       mClsName = className;
     }
 
     public void addMethod(MethodInfo method) {
+      Assertions.assertCondition(
+        !mMethods.contains(method), "Java Module " + mClsName.simpleName() + " method name already registered: " + method.mName);
       mMethods.add(method);
     }
   }
@@ -312,29 +292,55 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
       mIsSyncHook = isSyncHook;
       mParameters = executableElement.getParameters();
       mParametersNum = mParameters.size();
-      mSignature = buildSignature(mParameters, types, elements);
+      mSignature = buildSignature(isSyncHook, executableElement.getReturnType(), mParameters, types, elements);
       mName = executableElement.getSimpleName().toString();
     }
 
-    private String buildSignature(List<? extends VariableElement> paramTypes, Types types, Elements elements) {
+    public boolean isSyncMethod(){
+      return mIsSyncHook;
+    }
+
+    private String buildSignature(boolean isSync, TypeMirror returnType, List<? extends VariableElement> paramTypes, Types types, Elements elements) {
       int size = paramTypes.size();
       StringBuilder builder = new StringBuilder(size);
-      builder.append("v.");
+      if (isSync) {
+        builder.append(returnTypeToChar(returnType));
+        builder.append(".");
+      } else {
+        builder.append("v.");
+      }
       for (int i = 0; i < size; i++) {
         VariableElement parameter = paramTypes.get(i);
         TypeMirror mirror = parameter.asType();
-        if (types.isSubtype(mirror, elements.getTypeElement(Promise.class.getName()).asType())) {
+        if (types.isSameType(mirror, elements.getTypeElement(Promise.class.getName()).asType())) {
           Assertions.assertCondition(
             i == size - 1, "Promise must be used as last parameter only");
           mMethodType = TYPE_RESULT_PROMISE;
           mParametersNum++;
-        } else if (types.isSubtype(mirror, elements.getTypeElement(EXECUTORTOKEN.packageName() + "." + EXECUTORTOKEN.simpleName()).asType())) {
-          mParametersNum--;
         }
         builder.append(paramTypeToChar(parameter));
       }
 
       return builder.toString();
+    }
+
+    private char returnTypeToChar(TypeMirror type) {
+      // Keep this in sync with MethodInvoker
+      TypeName indexType = TypeName.get(type);
+      char tryCommon = commonTypeToChar(indexType);
+      if (tryCommon != '\0') {
+        return tryCommon;
+      }
+      if (TypeName.get(void.class).equals(indexType)) {
+        return 'v';
+      } else if (TypeName.get(WritableMap.class).equals(indexType)) {
+        return 'M';
+      } else if (TypeName.get(WritableArray.class).equals(indexType)) {
+        return 'A';
+      } else {
+        throw new RuntimeException(
+          "Got unknown return class: " + indexType);
+      }
     }
 
     private char paramTypeToChar(VariableElement parameter) {
@@ -343,9 +349,7 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
       if (tryCommon != '\0') {
         return tryCommon;
       }
-      if (ClassName.get(parameter.asType()).equals(EXECUTORTOKEN)) {
-        return 'T';
-      } else if (indexType.equals(TypeName.get(Callback.class))) {
+      if (indexType.equals(TypeName.get(Callback.class))) {
         return 'X';
       } else if (indexType.equals(TypeName.get(Promise.class))) {
         return 'P';
@@ -353,6 +357,8 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
         return 'M';
       } else if (indexType.equals(TypeName.get(ReadableArray.class))) {
         return 'A';
+      } else if (indexType.equals(TypeName.get(Dynamic.class))) {
+        return 'Y';
       } else {
         throw new RuntimeException(
           "Got unknown param class: " + indexType.toString());
@@ -392,28 +398,28 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
       int offset = 0;
       for (int i = 0, len = mParameters.size(); i < len; i++) {
         TypeName indexType = TypeName.get(mParameters.get(i).asType());
-        if ((ClassName.get(mParameters.get(i).asType()).equals(EXECUTORTOKEN))) {
-          builder.add("$L", "executorToken");
-          builder.add(", ");
-          continue;
-        } else if (indexType.equals(TypeName.get(boolean.class)) || indexType.equals(TypeName.get(Boolean.class))) {
+        if (indexType.equals(TypeName.get(boolean.class)) || indexType.equals(TypeName.get(Boolean.class))) {
           builder.add("$L.getBoolean($L)", "parameters", offset);
-        } else if (indexType.equals(TypeName.get(int.class)) || indexType.equals(TypeName.get(Integer.class))) {
-          builder.add("(int)$L.getDouble($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(double.class)) || indexType.equals(TypeName.get(Double.class))) {
           builder.add("$L.getDouble($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(float.class)) || indexType.equals(TypeName.get(Float.class))) {
           builder.add("(float)$L.getDouble($L)", "parameters", offset);
+        } else if (indexType.equals(TypeName.get(int.class)) || indexType.equals(TypeName.get(Integer.class))) {
+          builder.add("(int)$L.getDouble($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(String.class))) {
           builder.add("$L.getString($L)", "parameters", offset);
-        } else if (indexType.equals(ClassName.get(Callback.class))) {
-          builder.add("createCallback($L, $L, $L, $L)", "catalystInstance", "executorToken", offset, "parameters");
-        } else if (indexType.equals(TypeName.get(Promise.class))) {
-          builder.add("createPromise($L, $L, $L, $L)", "catalystInstance", "executorToken", offset, "parameters");
-        } else if (indexType.equals(TypeName.get(ReadableMap.class))) {
-          builder.add("$L.getMap($L)", "parameters", offset);
         } else if (indexType.equals(TypeName.get(ReadableArray.class))) {
           builder.add("$L.getArray($L)", "parameters", offset);
+        } else if (indexType.equals(TypeName.get(Dynamic.class))) {
+          builder.add("$T.create($L, $L)", DYNAMICFROMARRAY, "parameters", offset);
+        } else if (indexType.equals(TypeName.get(ReadableMap.class))) {
+          builder.add("$L.getMap($L)", "parameters", offset);
+        } else if (indexType.equals(TypeName.get(Callback.class))) {
+          builder.add("new $T($L, (int)$L.getDouble($L))", CALLBACKIMP, "jsInstance", "parameters", offset);
+        } else if (indexType.equals(TypeName.get(Promise.class))) {
+          builder.add("new $T(new $T($L, (int)$L.getDouble($L)), new $T($L, (int)$L.getDouble($L)))", PROMISEIMP
+            , CALLBACKIMP, "jsInstance", "parameters", offset,
+            CALLBACKIMP, "jsInstance", "parameters", offset + 1);
         } else {
           throw new RuntimeException("can not parse parameters in " + mName + ", index " + i + ", type " + indexType.toString() + ", " + ClassName.get(mParameters.get(i).asType()).toString());
         }
@@ -426,8 +432,9 @@ public class ReactNativeModuleProcessor extends AbstractProcessor {
       return builder.build();
     }
 
-    private String getMethodType() {
-      return mIsSyncHook ? TYPE_RESULT_SYNC : mMethodType;
+    @Override
+    public boolean equals(Object o) {
+      return o instanceof MethodInfo && ((MethodInfo) o).mName.equals(mName);
     }
   }
 }
